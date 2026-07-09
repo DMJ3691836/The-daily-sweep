@@ -79,12 +79,14 @@ is_us_session = (current_hour >= 14 and current_hour < 21)  // 9:30-16:00 EST in
 is_uk_session = (current_hour >= 8 and current_hour < 16)   // 8:00-16:30 GMT in UTC
 is_asia_session = (current_hour >= 19 or current_hour < 4)  // 19:30-4:00 GMT in UTC
 
-session_filter_active = false
-if enable_session_filter
-    session_filter_active := session_type == "US" ? is_us_session :
-                           session_type == "UK" ? is_uk_session :
-                           session_type == "ASIA" ? is_asia_session :
-                           true
+// Session filter logic: If filter disabled, allow all signals (session_filter_active = true)
+// If filter enabled, check the selected session
+session_filter_active = enable_session_filter ? 
+                       (session_type == "US" ? is_us_session :
+                        session_type == "UK" ? is_uk_session :
+                        session_type == "ASIA" ? is_asia_session :
+                        true) :
+                       true
 
 // ============================================================================
 // SIGNAL GENERATION
