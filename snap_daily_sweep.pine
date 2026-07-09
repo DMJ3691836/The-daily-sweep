@@ -8,14 +8,14 @@ indicator("SNAP Daily Sweep", shorttitle="SNAP Sweep", overlay=true, max_bars_ba
 // === SECTION: Volume Sweep Configuration ===
 group_volume = "Volume Sweep Settings"
 enable_volume = input(true, "Enable Volume Sweep", group=group_volume)
-volume_lookback = input(20, "Volume Lookback Period", minval=5, maxval=100, group=group_volume)
-volume_multiplier = input(1.5, "Volume Multiplier", minval=0.5, maxval=5.0, step=0.1, group=group_volume)
+volume_lookback = input.int(20, "Volume Lookback Period", minval=5, maxval=100, group=group_volume)
+volume_multiplier = input.float(1.5, "Volume Multiplier", minval=0.5, maxval=5.0, step=0.1, group=group_volume)
 volume_filter_type = input.string("SMA", "Volume Filter Type", options=["SMA", "EMA", "Simple"], group=group_volume)
 
 // === SECTION: Support & Resistance Configuration ===
 group_sr = "Support & Resistance"
 enable_sr = input(true, "Enable S/R Detection", group=group_sr)
-sr_lookback = input(50, "S/R Lookback Period", minval=10, maxval=200, group=group_sr)
+sr_lookback = input.int(50, "S/R Lookback Period", minval=10, maxval=200, group=group_sr)
 sr_sensitivity = input.float(0.5, "S/R Sensitivity", minval=0.1, maxval=2.0, step=0.1, group=group_sr)
 detect_support = input(true, "Detect Support Levels", group=group_sr)
 detect_resistance = input(true, "Detect Resistance Levels", group=group_sr)
@@ -23,16 +23,16 @@ detect_resistance = input(true, "Detect Resistance Levels", group=group_sr)
 // === SECTION: Momentum Configuration ===
 group_momentum = "Momentum Settings"
 enable_momentum = input(true, "Enable Momentum Analysis", group=group_momentum)
-momentum_length = input(14, "Momentum RSI Length", minval=5, maxval=50, group=group_momentum)
-rsi_overbought = input(70, "RSI Overbought Level", minval=50, maxval=99, group=group_momentum)
-rsi_oversold = input(30, "RSI Oversold Level", minval=1, maxval=50, group=group_momentum)
+momentum_length = input.int(14, "Momentum RSI Length", minval=5, maxval=50, group=group_momentum)
+rsi_overbought = input.int(70, "RSI Overbought Level", minval=50, maxval=99, group=group_momentum)
+rsi_oversold = input.int(30, "RSI Oversold Level", minval=1, maxval=50, group=group_momentum)
 
 // === SECTION: Display Configuration ===
 group_display = "Display Settings"
 show_volume_alerts = input(true, "Show Volume Alerts", group=group_display)
 show_sr_lines = input(true, "Show S/R Lines", group=group_display)
 show_momentum_color = input(true, "Show Momentum Color Coding", group=group_display)
-bar_transparency = input(50, "Bar Transparency %", minval=0, maxval=100, group=group_display)
+bar_transparency = input.int(50, "Bar Transparency %", minval=0, maxval=100, group=group_display)
 
 // === SECTION: Filter Configuration ===
 group_filter = "Filter Settings"
