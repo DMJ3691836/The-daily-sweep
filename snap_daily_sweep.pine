@@ -1,0 +1,189 @@
+//@version=5
+indicator("SNAP Daily Sweep", shorttitle="SNAP Sweep", overlay=true, max_bars_back=500)
+
+// ============================================================================
+// CONFIGURATION SECTION
+// ============================================================================
+
+// === SECTION: Volume Sweep Configuration ===
+group_volume = "Volume Sweep Settings"
+enable_volume = input(true, "Enable Volume Sweep", group=group_volume)
+volume_lookback = input(20, "Volume Lookback Period", minval=5, maxval=100, group=group_volume)
+volume_multiplier = input(1.5, "Volume Multiplier", minval=0.5, maxval=5.0, step=0.1, group=group_volume)
+volume_filter_type = input.string("SMA", "Volume Filter Type", options=["SMA", "EMA", "Simple"], group=group_volume)
+
+// === SECTION: Support & Resistance Configuration ===
+group_sr = "Support & Resistance"
+enable_sr = input(true, "Enable S/R Detection", group=group_sr)
+sr_lookback = input(50, "S/R Lookback Period", minval=10, maxval=200, group=group_sr)
+sr_sensitivity = input.float(0.5, "S/R Sensitivity", minval=0.1, maxval=2.0, step=0.1, group=group_sr)
+detect_support = input(true, "Detect Support Levels", group=group_sr)
+detect_resistance = input(true, "Detect Resistance Levels", group=group_sr)
+
+// === SECTION: Momentum Configuration ===
+group_momentum = "Momentum Settings"
+enable_momentum = input(true, "Enable Momentum Analysis", group=group_momentum)
+momentum_length = input(14, "Momentum RSI Length", minval=5, maxval=50, group=group_momentum)
+rsi_overbought = input(70, "RSI Overbought Level", minval=50, maxval=99, group=group_momentum)
+rsi_oversold = input(30, "RSI Oversold Level", minval=1, maxval=50, group=group_momentum)
+
+// === SECTION: Display Configuration ===
+group_display = "Display Settings"
+show_volume_alerts = input(true, "Show Volume Alerts", group=group_display)
+show_sr_lines = input(true, "Show S/R Lines", group=group_display)
+show_momentum_color = input(true, "Show Momentum Color Coding", group=group_display)
+bar_transparency = input(50, "Bar Transparency %", minval=0, maxval=100, group=group_display)
+
+// === SECTION: Filter Configuration ===
+group_filter = "Filter Settings"
+enable_timeframe_filter = input(true, "Enable Timeframe Filter", group=group_filter)
+filter_timeframe = input.string("D", "Filter Timeframe", options=["5", "15", "60", "240", "D", "W"], group=group_filter)
+enable_session_filter = input(true, "Enable Session Filter", group=group_filter)
+session_type = input.string("US", "Session Type", options=["US", "UK", "ASIA", "ALL"], group=group_filter)
+
+// ============================================================================
+// CALCULATIONS
+// ============================================================================
+
+// === Volume Calculations ===
+current_volume = volume
+avg_volume = volume_filter_type == "SMA" ? ta.sma(volume, volume_lookback) : 
+             volume_filter_type == "EMA" ? ta.ema(volume, volume_lookback) : 
+             ta.avg(volume[0], volume[1])
+
+volume_ratio = current_volume / avg_volume
+is_high_volume = volume_ratio > volume_multiplier
+is_low_volume = volume_ratio < (1 / volume_multiplier)
+
+// === Support & Resistance Calculations ===
+highest = ta.highest(high, sr_lookback)
+lowest = ta.lowest(low, sr_lookback)
+range_sr = highest - lowest
+resistance_level = highest - (range_sr * sr_sensitivity / 100)
+support_level = lowest + (range_sr * sr_sensitivity / 100)
+
+// === Momentum Calculations ===
+rsi = ta.rsi(close, momentum_length)
+is_overbought = rsi > rsi_overbought
+is_oversold = rsi < rsi_oversold
+momentum_bullish = close > ta.ema(close, momentum_length)
+momentum_bearish = close < ta.ema(close, momentum_length)
+
+// === Session Detection ===
+// US Session: 9:30 - 16:00 EST
+// UK Session: 8:00 - 16:30 GMT
+// ASIA Session: 19:30 - 4:00 GMT
+
+current_hour = hour
+is_us_session = (current_hour >= 14 and current_hour < 21)  // 9:30-16:00 EST in UTC
+is_uk_session = (current_hour >= 8 and current_hour < 16)   // 8:00-16:30 GMT in UTC
+is_asia_session = (current_hour >= 19 or current_hour < 4)  // 19:30-4:00 GMT in UTC
+
+session_filter_active = false
+if enable_session_filter
+    session_filter_active := session_type == "US" ? is_us_session :
+                           session_type == "UK" ? is_uk_session :
+                           session_type == "ASIA" ? is_asia_session :
+                           true
+
+// ============================================================================
+// SIGNAL GENERATION
+// ============================================================================
+
+// Strong Buy Signal: High volume + Oversold momentum + Price at support
+buy_signal = enable_volume and enable_momentum and enable_sr and 
+             is_high_volume and is_oversold and 
+             close <= support_level and session_filter_active
+
+// Strong Sell Signal: High volume + Overbought momentum + Price at resistance
+sell_signal = enable_volume and enable_momentum and enable_sr and 
+              is_high_volume and is_overbought and 
+              close >= resistance_level and session_filter_active
+
+// ============================================================================
+// VISUALIZATION
+// ============================================================================
+
+// Support & Resistance Lines
+if enable_sr and show_sr_lines
+    line.new(bar_index[sr_lookback], resistance_level, bar_index, resistance_level, 
+             color=color.new(color.red, 50), width=2, style=line.style_dashed, xloc=xloc.bar_index)
+    line.new(bar_index[sr_lookback], support_level, bar_index, support_level, 
+             color=color.new(color.green, 50), width=2, style=line.style_dashed, xloc=xloc.bar_index)
+
+// Momentum-based Bar Coloring
+if enable_momentum and show_momentum_color
+    bar_color = is_overbought ? color.new(color.red, bar_transparency) :
+                is_oversold ? color.new(color.green, bar_transparency) :
+                momentum_bullish ? color.new(color.blue, bar_transparency) :
+                momentum_bearish ? color.new(color.orange, bar_transparency) :
+                na
+    barcolor(bar_color)
+
+// Volume-based Alerts on the Chart
+if enable_volume and show_volume_alerts
+    if is_high_volume
+        label.new(bar_index, high, "↑ Vol", color=color.new(color.green, 0), 
+                  textcolor=color.white, style=label.style_label_down, yloc=yloc.abovebar)
+    if is_low_volume
+        label.new(bar_index, low, "↓ Vol", color=color.new(color.red, 0), 
+                  textcolor=color.white, style=label.style_label_up, yloc=yloc.belowbar)
+
+// Buy and Sell Signal Markers
+if buy_signal
+    label.new(bar_index, low, "BUY", color=color.new(color.green, 0), 
+              textcolor=color.white, style=label.style_label_up, yloc=yloc.belowbar, size=size.large)
+    alert("SNAP Sweep: Strong BUY Signal - Volume Surge + Oversold + Support Level")
+
+if sell_signal
+    label.new(bar_index, high, "SELL", color=color.new(color.red, 0), 
+              textcolor=color.white, style=label.style_label_down, yloc=yloc.abovebar, size=size.large)
+    alert("SNAP Sweep: Strong SELL Signal - Volume Surge + Overbought + Resistance Level")
+
+// ============================================================================
+// PLOTS & STATS
+// ============================================================================
+
+// Plot Volume Ratio
+plot(enable_volume ? volume_ratio : na, title="Volume Ratio", color=color.new(color.purple, 50), linewidth=2)
+hline(volume_multiplier, "Volume Threshold", color=color.purple, linestyle=hline.style_dashed)
+
+// Plot RSI
+plot(enable_momentum ? rsi : na, title="RSI", color=color.new(color.blue, 50), linewidth=2)
+hline(rsi_overbought, "Overbought", color=color.red, linestyle=hline.style_dotted)
+hline(rsi_oversold, "Oversold", color=color.green, linestyle=hline.style_dotted)
+hline(50, "Middle", color=color.gray, linestyle=hline.style_dotted)
+
+// ============================================================================
+// TABLE DISPLAY
+// ============================================================================
+
+// Create summary table
+var table summary_table = table.new(position=position.top_right, columns=2, rows=7, 
+                                     border_color=color.gray, border_width=1)
+
+if barstate.islast
+    table.cell(summary_table, 0, 0, "SNAP Daily Sweep", bgcolor=color.new(color.blue, 80), text_color=color.white, text_size=size.large)
+    
+    table.cell(summary_table, 0, 1, "Metric", bgcolor=color.new(color.gray, 80), text_color=color.white)
+    table.cell(summary_table, 1, 1, "Value", bgcolor=color.new(color.gray, 80), text_color=color.white)
+    
+    table.cell(summary_table, 0, 2, "Volume Status:")
+    table.cell(summary_table, 1, 2, is_high_volume ? "HIGH ↑" : is_low_volume ? "LOW ↓" : "Normal", 
+              bgcolor=is_high_volume ? color.new(color.green, 50) : is_low_volume ? color.new(color.red, 50) : na)
+    
+    table.cell(summary_table, 0, 3, "RSI:")
+    table.cell(summary_table, 1, 3, str.tostring(rsi, "#.00"), 
+              bgcolor=is_overbought ? color.new(color.red, 50) : is_oversold ? color.new(color.green, 50) : na)
+    
+    table.cell(summary_table, 0, 4, "Momentum:")
+    table.cell(summary_table, 1, 4, momentum_bullish ? "BULLISH ↑" : "BEARISH ↓", 
+              bgcolor=momentum_bullish ? color.new(color.green, 50) : color.new(color.red, 50))
+    
+    table.cell(summary_table, 0, 5, "Signal:")
+    table.cell(summary_table, 1, 5, buy_signal ? "BUY ↑" : sell_signal ? "SELL ↓" : "WAIT", 
+              bgcolor=buy_signal ? color.new(color.green, 50) : sell_signal ? color.new(color.red, 50) : color.new(color.gray, 50))
+    
+    table.cell(summary_table, 0, 6, "Session:")
+    session_text = session_type == "US" ? "US" : session_type == "UK" ? "UK" : session_type == "ASIA" ? "ASIA" : "ALL"
+    table.cell(summary_table, 1, 6, session_text, bgcolor=session_filter_active ? color.new(color.green, 50) : color.new(color.red, 50))
