@@ -116,18 +116,24 @@ if enable_momentum and show_momentum_color
 barcolor(bar_color)
 
 // ============================================================================
-// PLOTS & STATS
+// PLOTS & STATS - RSI SECTION
 // ============================================================================
 
-// Plot Volume Ratio
-plot(enable_volume ? volume_ratio : na, title="Volume Ratio", color=color.new(color.purple, 50), linewidth=2)
-hline(volume_multiplier, "Volume Threshold", color=color.purple, linestyle=hline.style_dashed)
-
-// Plot RSI with proper 0-100 scale
+// Plot RSI with proper 0-100 scale in dedicated RSI pane
 plot(enable_momentum ? rsi : na, title="RSI", color=color.new(color.blue, 50), linewidth=2)
-hline(rsi_overbought, "Overbought", color=color.red, linestyle=hline.style_dotted)
-hline(rsi_oversold, "Oversold", color=color.green, linestyle=hline.style_dotted)
-hline(50, "Middle", color=color.gray, linestyle=hline.style_dotted)
+hline(rsi_overbought, "RSI Overbought", color=color.red, linestyle=hline.style_dotted)
+hline(rsi_oversold, "RSI Oversold", color=color.green, linestyle=hline.style_dotted)
+hline(50, "RSI Middle", color=color.gray, linestyle=hline.style_dotted)
+
+// ============================================================================
+// PLOTS & STATS - VOLUME RATIO SECTION
+// ============================================================================
+
+// Plot Volume Ratio with thresholds
+plot(enable_volume ? volume_ratio : na, title="Volume Ratio", color=color.new(color.purple, 50), linewidth=2)
+hline(volume_multiplier, "Volume Threshold (High)", color=color.green, linestyle=hline.style_dashed)
+hline(1 / volume_multiplier, "Volume Threshold (Low)", color=color.red, linestyle=hline.style_dashed)
+hline(1.0, "Volume Baseline", color=color.gray, linestyle=hline.style_dotted)
 
 // ============================================================================
 // TABLE DISPLAY
