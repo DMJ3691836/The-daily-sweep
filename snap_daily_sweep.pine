@@ -108,9 +108,9 @@ if enable_sr and show_sr_lines
     line.new(bar_index[sr_lookback], support_level, bar_index, support_level, 
              color=color.new(color.green, 50), width=2, style=line.style_dashed, xloc=xloc.bar_index)
 
-// Momentum-based Bar Coloring
+// Momentum-based Bar Coloring - must be at chart scope
+color bar_color = na
 if enable_momentum and show_momentum_color
-    color bar_color = na
     if is_overbought
         bar_color := color.new(color.red, bar_transparency)
     else if is_oversold
@@ -119,7 +119,8 @@ if enable_momentum and show_momentum_color
         bar_color := color.new(color.blue, bar_transparency)
     else if momentum_bearish
         bar_color := color.new(color.orange, bar_transparency)
-    barcolor(bar_color)
+
+barcolor(bar_color)
 
 // Volume-based Alerts on the Chart
 if enable_volume and show_volume_alerts
