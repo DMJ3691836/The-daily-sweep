@@ -116,24 +116,34 @@ if enable_momentum and show_momentum_color
 barcolor(bar_color)
 
 // ============================================================================
-// PLOTS & STATS - RSI SECTION
+// PLOTS & STATS - RSI THRESHOLD SECTION
 // ============================================================================
 
-// Plot RSI with proper 0-100 scale in dedicated RSI pane
-plot(enable_momentum ? rsi : na, title="RSI", color=color.new(color.blue, 50), linewidth=2)
-hline(rsi_overbought, "RSI Overbought", color=color.red, linestyle=hline.style_dotted)
-hline(rsi_oversold, "RSI Oversold", color=color.green, linestyle=hline.style_dotted)
-hline(50, "RSI Middle", color=color.gray, linestyle=hline.style_dotted)
+// Plot RSI with bigger linewidth for better visibility
+plot(enable_momentum ? rsi : na, title="RSI", color=color.new(color.blue, 30), linewidth=4)
+
+// RSI Threshold Lines - thicker for visibility
+hline(rsi_overbought, "RSI Overbought", color=color.red, linestyle=hline.style_dotted, linewidth=2)
+hline(rsi_oversold, "RSI Oversold", color=color.green, linestyle=hline.style_dotted, linewidth=2)
+hline(50, "RSI Middle", color=color.gray, linestyle=hline.style_dotted, linewidth=1)
+
+// Red circles when RSI crosses above overbought level
+if enable_momentum and is_overbought
+    plotshape(series=rsi, title="Overbought Signal", style=shape.circle, location=location.absolute, color=color.new(color.red, 20), size=size.large)
+
+// Green circles when RSI crosses below oversold level
+if enable_momentum and is_oversold
+    plotshape(series=rsi, title="Oversold Signal", style=shape.circle, location=location.absolute, color=color.new(color.green, 20), size=size.large)
 
 // ============================================================================
 // PLOTS & STATS - VOLUME RATIO SECTION
 // ============================================================================
 
-// Plot Volume Ratio with thresholds
-plot(enable_volume ? volume_ratio : na, title="Volume Ratio", color=color.new(color.purple, 50), linewidth=2)
-hline(volume_multiplier, "Volume Threshold (High)", color=color.green, linestyle=hline.style_dashed)
-hline(1 / volume_multiplier, "Volume Threshold (Low)", color=color.red, linestyle=hline.style_dashed)
-hline(1.0, "Volume Baseline", color=color.gray, linestyle=hline.style_dotted)
+// Plot Volume Ratio with thicker lines
+plot(enable_volume ? volume_ratio : na, title="Volume Ratio", color=color.new(color.purple, 30), linewidth=4)
+hline(volume_multiplier, "Volume Threshold (High)", color=color.green, linestyle=hline.style_dashed, linewidth=2)
+hline(1 / volume_multiplier, "Volume Threshold (Low)", color=color.red, linestyle=hline.style_dashed, linewidth=2)
+hline(1.0, "Volume Baseline", color=color.gray, linestyle=hline.style_dotted, linewidth=1)
 
 // ============================================================================
 // TABLE DISPLAY
