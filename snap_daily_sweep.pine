@@ -110,16 +110,15 @@ if enable_sr and show_sr_lines
 
 // Momentum-based Bar Coloring
 if enable_momentum and show_momentum_color
+    color bar_color = na
     if is_overbought
-        bar_color = color.new(color.red, bar_transparency)
+        bar_color := color.new(color.red, bar_transparency)
     else if is_oversold
-        bar_color = color.new(color.green, bar_transparency)
+        bar_color := color.new(color.green, bar_transparency)
     else if momentum_bullish
-        bar_color = color.new(color.blue, bar_transparency)
+        bar_color := color.new(color.blue, bar_transparency)
     else if momentum_bearish
-        bar_color = color.new(color.orange, bar_transparency)
-    else
-        bar_color = na
+        bar_color := color.new(color.orange, bar_transparency)
     barcolor(bar_color)
 
 // Volume-based Alerts on the Chart
