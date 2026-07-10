@@ -49,7 +49,7 @@ session_type = input.string("US", "Session Type", options=["US", "UK", "ASIA", "
 current_volume = volume
 avg_volume = volume_filter_type == "SMA" ? ta.sma(volume, volume_lookback) : 
              volume_filter_type == "EMA" ? ta.ema(volume, volume_lookback) : 
-             ta.avg(volume[0], volume[1])
+             (volume[0] + volume[1]) / 2
 
 volume_ratio = current_volume / avg_volume
 is_high_volume = volume_ratio > volume_multiplier
