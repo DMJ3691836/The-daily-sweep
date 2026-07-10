@@ -1,5 +1,5 @@
 //@version=5
-indicator("SNAP Daily Sweep", shorttitle="SNAP Sweep", overlay=true, max_bars_back=500)
+indicator("SNAP Daily Sweep", shorttitle="SNAP Sweep", overlay=false, max_bars_back=500)
 
 // ============================================================================
 // CONFIGURATION SECTION
@@ -101,13 +101,6 @@ sell_signal = enable_volume and enable_momentum and enable_sr and
 // VISUALIZATION
 // ============================================================================
 
-// Support & Resistance Lines
-if enable_sr and show_sr_lines
-    line.new(bar_index[sr_lookback], resistance_level, bar_index, resistance_level, 
-             color=color.new(color.red, 50), width=2, style=line.style_dashed, xloc=xloc.bar_index)
-    line.new(bar_index[sr_lookback], support_level, bar_index, support_level, 
-             color=color.new(color.green, 50), width=2, style=line.style_dashed, xloc=xloc.bar_index)
-
 // Momentum-based Bar Coloring - must be at chart scope
 color bar_color = na
 if enable_momentum and show_momentum_color
@@ -122,26 +115,6 @@ if enable_momentum and show_momentum_color
 
 barcolor(bar_color)
 
-// Volume-based Alerts on the Chart
-if enable_volume and show_volume_alerts
-    if is_high_volume
-        label.new(bar_index, high, "↑ Vol", color=color.new(color.green, 0), 
-                  textcolor=color.white, style=label.style_label_down, yloc=yloc.abovebar)
-    if is_low_volume
-        label.new(bar_index, low, "↓ Vol", color=color.new(color.red, 0), 
-                  textcolor=color.white, style=label.style_label_up, yloc=yloc.belowbar)
-
-// Buy and Sell Signal Markers
-if buy_signal
-    label.new(bar_index, low, "BUY", color=color.new(color.green, 0), 
-              textcolor=color.white, style=label.style_label_up, yloc=yloc.belowbar, size=size.large)
-    alert("SNAP Sweep: Strong BUY Signal - Volume Surge + Oversold + Support Level")
-
-if sell_signal
-    label.new(bar_index, high, "SELL", color=color.new(color.red, 0), 
-              textcolor=color.white, style=label.style_label_down, yloc=yloc.abovebar, size=size.large)
-    alert("SNAP Sweep: Strong SELL Signal - Volume Surge + Overbought + Resistance Level")
-
 // ============================================================================
 // PLOTS & STATS
 // ============================================================================
@@ -150,7 +123,7 @@ if sell_signal
 plot(enable_volume ? volume_ratio : na, title="Volume Ratio", color=color.new(color.purple, 50), linewidth=2)
 hline(volume_multiplier, "Volume Threshold", color=color.purple, linestyle=hline.style_dashed)
 
-// Plot RSI
+// Plot RSI with proper 0-100 scale
 plot(enable_momentum ? rsi : na, title="RSI", color=color.new(color.blue, 50), linewidth=2)
 hline(rsi_overbought, "Overbought", color=color.red, linestyle=hline.style_dotted)
 hline(rsi_oversold, "Oversold", color=color.green, linestyle=hline.style_dotted)
