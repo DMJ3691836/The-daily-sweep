@@ -24,6 +24,10 @@ indicator("The Daily Sweep", shorttitle="DSwp", overlay=true,
 var string G_BIAS  = "📅  Daily Bias"
 var string G_NY    = "🗽  New York Session"
 var string G_FVG   = "⬜  Fair Value Gap"
+var string G_FILTER = "🎯  Filters & Quality"
+var string G_RRR   = "📊  Risk-Reward"
+var string G_DASH  = "📈  Dashboard"
+var string G_ALERTS = "🔔  Alerts"
 var string G_VIS   = "🎨  Visual"
 
 lookback   = input.int(10, "Sweep Lookback (bars)", minval=3, maxval=50, group=G_BIAS,
@@ -40,6 +44,25 @@ fvg_extend = input.int(50,    "FVG Box Width (bars)", minval=5, maxval=500, grou
                        tooltip="How many bars to the right the FVG box extends while the setup is active.")
 fvg_window = input.int(5,     "FVG Lookback After Sweep", minval=1, maxval=20, group=G_FVG,
                        tooltip="Maximum number of bars after a sweep in which an aligned FVG must appear to be considered valid.")
+
+use_atr_filter = input.bool(true, "Enable ATR Volatility Filter", group=G_FILTER,
+                           tooltip="Only allow sweeps when volatility (ATR) is adequate. Filters noise in quiet conditions.")
+min_atr_pct = input.float(0.3, "Min ATR % of Price", minval=0.0, maxval=2.0, step=0.1, group=G_FILTER,
+                         tooltip="Minimum ATR as % of current price. Set 0 to disable. Higher = more selective.")
+
+use_rr_filter = input.bool(true, "Enable RR Filter", group=G_RRR,
+                          tooltip="Only show setups with risk-reward ratio above minimum threshold.")
+min_rr_ratio = input.float(2.0, "Minimum RR Ratio", minval=1.0, maxval=5.0, step=0.5, group=G_RRR,
+                          tooltip="Only show setups where reward/risk >= this ratio. 2.0 = 2:1 payoff.")
+show_rr_label = input.bool(true, "Show RR on Chart", group=G_RRR,
+                          tooltip="Display risk-reward ratio for active setups.")
+
+show_dashboard = input.bool(true, "Enable Dashboard", group=G_DASH,
+                           tooltip="Show real-time setup status and key metrics.")
+dash_pos = input.string("top-left", "Dashboard Position", options=["top-left", "top-right", "bottom-left", "bottom-right"], group=G_DASH)
+
+use_json_alerts = input.bool(false, "Use JSON-style Alert Messages", group=G_ALERTS,
+                            tooltip="Format alerts with JSON-like structure for journaling/automation.")
 
 bull_col   = input.color(#00897B, "Bullish Color", group=G_VIS)
 bear_col   = input.color(#D32F2F, "Bearish Color", group=G_VIS)
@@ -83,14 +106,28 @@ st_high = ta.highest(high, lookback)[1]
 st_low  = ta.lowest(low,  lookback)[1]
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  ATR & VOLATILITY FILTER
+//  Avoid sweeps in very quiet conditions by checking if current volatility
+//  is sufficient. ATR(14) must be > min_atr_pct% of close price.
+// ─────────────────────────────────────────────────────────────────────────────
+atr_14 = ta.atr(14)
+atr_pct = (atr_14 / close) * 100.0
+atr_threshold = min_atr_pct > 0 ? (close * min_atr_pct / 100.0) : 0
+volatility_ok = min_atr_pct <= 0 or atr_14 >= atr_threshold
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  SWEEP DETECTION
 //  A sweep (fake-out / liquidity grab) is identified when:
 //    Bullish sweep: candle wicks BELOW the short-term swing low but CLOSES above it
 //    Bearish sweep: candle wicks ABOVE the short-term swing high but CLOSES below it
 //  Both conditions are only valid during the NY session and when the daily bias agrees.
+//  Optionally, ATR filter can exclude sweeps when volatility is insufficient.
 // ─────────────────────────────────────────────────────────────────────────────
-bull_sweep = in_ny and bias == 1  and low  < st_low  and close > st_low
-bear_sweep = in_ny and bias == -1 and high > st_high and close < st_high
+bull_sweep_raw = in_ny and bias == 1  and low  < st_low  and close > st_low
+bear_sweep_raw = in_ny and bias == -1 and high > st_high and close < st_high
+
+bull_sweep = use_atr_filter ? (bull_sweep_raw and volatility_ok) : bull_sweep_raw
+bear_sweep = use_atr_filter ? (bear_sweep_raw and volatility_ok) : bear_sweep_raw
 
 // Record the extreme of the sweep candle — used as the stop-loss invalidation point
 var float sweep_low_val  = na
@@ -162,30 +199,56 @@ var box   box_b     = na
 var box   box_s     = na
 var bool  alerted_b = false   // has the pullback-entry alert fired for this bull setup?
 var bool  alerted_s = false   // has the pullback-entry alert fired for this bear setup?
+var float rr_ratio_b = na     // risk-reward ratio for bull setup
+var float rr_ratio_s = na     // risk-reward ratio for bear setup
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  RISK-REWARD CALCULATION HELPERS
+//  Calculate RR ratio and check if it meets minimum threshold.
+// ─────────────────────────────────────────────────────────────────────────────
+calcRRRatio(entry, stop_val, target) =>
+    risk = math.abs(entry - stop_val)
+    reward = math.abs(target - entry)
+    risk > 0 ? reward / risk : 0
+
+isSetupQualityOk(rr) =>
+    use_rr_filter ? rr >= min_rr_ratio : true
 
 // ── New bullish setup ─────────────────────────────────────────────────────────
 if aligned_bull_fvg and not active_b
-    fvg_top_b := bull_fvg_top
-    fvg_bot_b := bull_fvg_bot
-    stop_b    := sweep_low_val - syminfo.mintick   // one tick below the sweep low
-    active_b  := true
-    alerted_b := false
-    if show_fvg
-        box_b := box.new(bar_index - 2, fvg_top_b, bar_index + fvg_extend, fvg_bot_b,
-                          border_color=bull_col, bgcolor=color.new(bull_col, 85),
-                          border_width=1, border_style=line.style_dashed)
+    entry_zone_b = (bull_fvg_top + bull_fvg_bot) / 2.0  // midpoint for RR calculation
+    stop_candidate_b = sweep_low_val - syminfo.mintick
+    rr_candidate_b = calcRRRatio(entry_zone_b, stop_candidate_b, pd_high)
+    
+    if isSetupQualityOk(rr_candidate_b)
+        fvg_top_b := bull_fvg_top
+        fvg_bot_b := bull_fvg_bot
+        stop_b    := stop_candidate_b
+        rr_ratio_b := rr_candidate_b
+        active_b  := true
+        alerted_b := false
+        if show_fvg
+            box_b := box.new(bar_index - 2, fvg_top_b, bar_index + fvg_extend, fvg_bot_b,
+                              border_color=bull_col, bgcolor=color.new(bull_col, 85),
+                              border_width=1, border_style=line.style_dashed)
 
 // ── New bearish setup ─────────────────────────────────────────────────────────
 if aligned_bear_fvg and not active_s
-    fvg_top_s := bear_fvg_top
-    fvg_bot_s := bear_fvg_bot
-    stop_s    := sweep_high_val + syminfo.mintick  // one tick above the sweep high
-    active_s  := true
-    alerted_s := false
-    if show_fvg
-        box_s := box.new(bar_index - 2, fvg_top_s, bar_index + fvg_extend, fvg_bot_s,
-                          border_color=bear_col, bgcolor=color.new(bear_col, 85),
-                          border_width=1, border_style=line.style_dashed)
+    entry_zone_s = (bear_fvg_top + bear_fvg_bot) / 2.0  // midpoint for RR calculation
+    stop_candidate_s = sweep_high_val + syminfo.mintick
+    rr_candidate_s = calcRRRatio(entry_zone_s, stop_candidate_s, pd_low)
+    
+    if isSetupQualityOk(rr_candidate_s)
+        fvg_top_s := bear_fvg_top
+        fvg_bot_s := bear_fvg_bot
+        stop_s    := stop_candidate_s
+        rr_ratio_s := rr_candidate_s
+        active_s  := true
+        alerted_s := false
+        if show_fvg
+            box_s := box.new(bar_index - 2, fvg_top_s, bar_index + fvg_extend, fvg_bot_s,
+                              border_color=bear_col, bgcolor=color.new(bear_col, 85),
+                              border_width=1, border_style=line.style_dashed)
 
 // ── Pullback entry detection ───────────────────────────────────────────────────
 // Fire once when price first trades into the FVG zone from above (bull) / below (bear).
@@ -310,29 +373,118 @@ if show_bias and barstate.islast
               style=label.style_label_left, color=bias_clr,
               textcolor=color.white, size=size.normal)
 
+// ── Risk-Reward display on active setups ───────────────────────────────────────
+if show_rr_label and active_b and not na(rr_ratio_b)
+    rr_txt = "RR: " + str.tostring(rr_ratio_b, format.mintick)
+    label.new(bar_index, (fvg_top_b + fvg_bot_b) / 2, rr_txt,
+              yloc=yloc.price, style=label.style_label_center,
+              color=bull_col, textcolor=color.white, size=size.small)
+
+if show_rr_label and active_s and not na(rr_ratio_s)
+    rr_txt = "RR: " + str.tostring(rr_ratio_s, format.mintick)
+    label.new(bar_index, (fvg_top_s + fvg_bot_s) / 2, rr_txt,
+              yloc=yloc.price, style=label.style_label_center,
+              color=bear_col, textcolor=color.white, size=size.small)
+
 // ─────────────────────────────────────────────────────────────────────────────
-//  ALERT CONDITIONS
+//  INTERACTIVE DASHBOARD
+//  Displays real-time status of bias, session, active setup, and A+ checklist.
 // ─────────────────────────────────────────────────────────────────────────────
+if show_dashboard and barstate.islast
+    // Build dashboard text
+    string setup_status = active_b ? "🟦 Bull Active" : active_s ? "🟥 Bear Active" : "⚪ No Setup"
+    string ny_status = in_ny ? "🟢 NY OPEN" : "⚫ NY CLOSED"
+    string vol_status = volatility_ok ? "✓ Vol OK" : "✗ Vol Low"
+    
+    string entry_txt = active_b ? "Entry: " + str.tostring((fvg_top_b + fvg_bot_b) / 2, format.mintick) :
+                       active_s ? "Entry: " + str.tostring((fvg_top_s + fvg_bot_s) / 2, format.mintick) :
+                       "Entry: —"
+    string stop_txt = active_b ? "Stop: " + str.tostring(stop_b, format.mintick) :
+                      active_s ? "Stop: " + str.tostring(stop_s, format.mintick) :
+                      "Stop: —"
+    string target_txt = active_b ? "Target: " + str.tostring(pd_high, format.mintick) :
+                        active_s ? "Target: " + str.tostring(pd_low, format.mintick) :
+                        "Target: —"
+    string rr_txt = active_b ? "RR: " + str.tostring(rr_ratio_b, "0.0") + ":1" :
+                    active_s ? "RR: " + str.tostring(rr_ratio_s, "0.0") + ":1" :
+                    "RR: —"
+    
+    // A+ Checklist
+    string sweep_check = (bull_sweep_raw or bear_sweep_raw) ? "✓" : "○"
+    string fvg_check = (aligned_bull_fvg or aligned_bear_fvg) ? "✓" : "○"
+    string rr_check = (active_b or active_s) ? "✓" : "○"
+    
+    string dash_txt = 
+        "━━ DAILY SWEEP DASHBOARD ━━\n" +
+        setup_status + "  " + ny_status + "\n" +
+        "Bias: " + (bias == 1 ? "▲ BULL" : bias == -1 ? "▼ BEAR" : "◆ NEUTRAL") + "  " + vol_status + "\n" +
+        "────────────────────────\n" +
+        entry_txt + "\n" +
+        stop_txt + "\n" +
+        target_txt + "\n" +
+        rr_txt + "\n" +
+        "────────────────────────\n" +
+        "A+ CHECKLIST:\n" +
+        "Sweep: " + sweep_check + "  |  FVG: " + fvg_check + "  |  RR: " + rr_check + "  |  Vol: " + (volatility_ok ? "✓" : "✗")
+    
+    // Determine position
+    var_y = close
+    var_style = dash_pos == "top-left" ? label.style_label_left :
+                dash_pos == "top-right" ? label.style_label_right :
+                dash_pos == "bottom-left" ? label.style_label_left :
+                label.style_label_right
+    
+    label.new(bar_index + (dash_pos == "top-right" or dash_pos == "bottom-right" ? 1 : -1),
+              var_y, dash_txt,
+              style=var_style, color=color.new(#1a1a1a, 20), textcolor=color.white, size=size.small)
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ALERT CONDITIONS — with optional JSON-style enhanced messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Helper function to build JSON-style messages
+jsonSweepMessage(type) =>
+    json_msg = "{\"event\":\"" + type + "_sweep\",\"bias\":\"" + 
+               (bias == 1 ? "BULL" : "BEAR") + "\",\"atr%\":" + 
+               str.tostring(atr_pct, "0.00") + ",\"volatility\":\"" +
+               (volatility_ok ? "ADEQUATE" : "LOW") + "\"}"
+    use_json_alerts ? json_msg : "[Daily Sweep] " + type + " fake-out detected during NY session."
+
+jsonFVGMessage(type) =>
+    json_msg = "{\"event\":\"" + type + "_fvg\",\"entry_zone\":" + 
+               str.tostring(type == "BULL" ? (bull_fvg_top + bull_fvg_bot) / 2 : (bear_fvg_top + bear_fvg_bot) / 2, "0.00") +
+               ",\"target\":" + str.tostring(type == "BULL" ? pd_high : pd_low, "0.00") + ",\"rr\":" +
+               str.tostring(type == "BULL" ? rr_ratio_b : rr_ratio_s, "0.0") + "}"
+    use_json_alerts ? json_msg : "[Daily Sweep] " + type + " FVG confirmed. Await pullback entry."
+
+jsonEntryMessage(type) =>
+    json_msg = "{\"event\":\"" + type + "_entry\",\"entry_zone\":" + 
+               str.tostring(type == "BULL" ? (fvg_top_b + fvg_bot_b) / 2 : (fvg_top_s + fvg_bot_s) / 2, "0.00") +
+               ",\"stop\":" + str.tostring(type == "BULL" ? stop_b : stop_s, "0.00") +
+               ",\"target\":" + str.tostring(type == "BULL" ? pd_high : pd_low, "0.00") +
+               ",\"rr\":" + str.tostring(type == "BULL" ? rr_ratio_b : rr_ratio_s, "0.0") + "}"
+    use_json_alerts ? json_msg : "[Daily Sweep] Price in " + type + " FVG. Consider entry now."
+
 alertcondition(bull_sweep,
                title="Bullish Sweep Detected",
-               message="[Daily Sweep] Bearish fake-out (sweep below swing low) during NY session on a bullish daily bias. Watch for a bullish FVG.")
+               message=jsonSweepMessage("BULL"))
 
 alertcondition(bear_sweep,
                title="Bearish Sweep Detected",
-               message="[Daily Sweep] Bullish fake-out (sweep above swing high) during NY session on a bearish daily bias. Watch for a bearish FVG.")
+               message=jsonSweepMessage("BEAR"))
 
 alertcondition(aligned_bull_fvg,
                title="Bullish FVG Aligned – Await Pullback",
-               message="[Daily Sweep] Bullish FVG confirmed after sweep. Wait for price to pull back into the gap for a long entry. Stop: below sweep low. Target: PDH.")
+               message=jsonFVGMessage("BULL"))
 
 alertcondition(aligned_bear_fvg,
                title="Bearish FVG Aligned – Await Pullback",
-               message="[Daily Sweep] Bearish FVG confirmed after sweep. Wait for price to pull back into the gap for a short entry. Stop: above sweep high. Target: PDL.")
+               message=jsonFVGMessage("BEAR"))
 
 alertcondition(pullback_entry_b,
                title="Bullish Pullback Entry – Price in FVG",
-               message="[Daily Sweep] Price has pulled back into the bullish FVG. Consider entering long. Stop: below sweep low. Target: PDH.")
+               message=jsonEntryMessage("BULL"))
 
 alertcondition(pullback_entry_s,
                title="Bearish Pullback Entry – Price in FVG",
-               message="[Daily Sweep] Price has pulled back into the bearish FVG. Consider entering short. Stop: above sweep high. Target: PDL.")
+               message=jsonEntryMessage("BEAR"))
