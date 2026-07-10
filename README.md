@@ -59,6 +59,7 @@ When price retraces back *into* the FVG box, an **"ENTRY →"** label fires. Thi
 | **Sweep Lookback (bars)** | 10 | Number of 1H bars defining the short-term swing high/low |
 | **Show Daily Bias Label** | On | Displays the current bias and target price in the top-right corner |
 | **Show PDH / PDL Target Lines** | On | Plots stepped horizontal lines at the previous day's high and low |
+| **Show PDH / PDL in White (Cross-Reference Filter)** | On | Display white price points for PDH/PDL for easy cross-reference; toggle on/off to filter |
 
 ### New York Session
 | Setting | Default | Description |
@@ -125,6 +126,7 @@ Set up TradingView alerts using any of the built-in conditions:
 |---------|-------------|
 | **Teal stepped line** | Previous Day High (PDH) — bull target |
 | **Red stepped line** | Previous Day Low (PDL) — bear target |
+| **White stepped line** | Previous Day High/Low (white cross-reference) — toggle on/off to filter |
 | **Yellow background** | Active NY session window |
 | **"SWEEP ↑/↓" label** | Sweep (fake-out) candle detected |
 | **"FVG ✓" label** | Aligned Fair Value Gap confirmed |

@@ -34,6 +34,8 @@ lookback   = input.int(10, "Sweep Lookback (bars)", minval=3, maxval=50, group=G
                        tooltip="Number of 1H bars used to define the short-term swing high/low that price must sweep through.")
 show_bias  = input.bool(true, "Show Daily Bias Label",        group=G_BIAS)
 show_pdhl  = input.bool(true, "Show PDH / PDL Target Lines",  group=G_BIAS)
+show_pdhl_white = input.bool(true, "Show PDH / PDL in White (Cross-Reference Filter)", group=G_BIAS,
+                            tooltip="Display Previous Day High/Low as white price points for easy cross-reference. Toggle on/off to filter.")
 
 ny_session = input.session("0930-1200", "NY Sweep Window", group=G_NY,
                            tooltip="Time window in New York time during which sweeps are monitored. Default covers the key NY open hours.")
@@ -326,6 +328,12 @@ plot(show_pdhl ? pd_high : na, "PDH – Bull Target",
      color=color.new(bull_col, 20), linewidth=1, style=plot.style_stepline)
 plot(show_pdhl ? pd_low : na,  "PDL – Bear Target",
      color=color.new(bear_col, 20), linewidth=1, style=plot.style_stepline)
+
+// White PDH / PDL for cross-reference filtering
+plot(show_pdhl_white ? pd_high : na, "PDH – Cross-Reference (White)",
+     color=color.new(color.white, 10), linewidth=2, style=plot.style_stepline)
+plot(show_pdhl_white ? pd_low : na,  "PDL – Cross-Reference (White)",
+     color=color.new(color.white, 10), linewidth=2, style=plot.style_stepline)
 
 // Background shading during the NY session window
 bgcolor(in_ny ? color.new(color.yellow, 95) : na, title="NY Session Background")
