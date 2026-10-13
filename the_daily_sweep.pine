@@ -1,309 +1,498 @@
 //@version=5
-indicator("The Daily Sweep", shorttitle="Daily Sweep", overlay=true, max_bars_back=500)
+indicator("The Daily Sweep", shorttitle="DSwp", overlay=true,
+          max_lines_count=500, max_labels_count=500, max_boxes_count=500)
 
-// ============================================================================
-// INPUTS
-// ============================================================================
+// ══════════════════════════════════════════════════════════════════════════════
+//  THE DAILY SWEEP — Pine Script v5 Indicator
+//
+//  WORKFLOW (use on 1-Hour chart):
+//  1. Reads the daily timeframe to determine who is in control of the market.
+//       • Higher Highs + Higher Lows on the daily → Bullish bias; target = PDH
+//       • Lower  Highs + Lower  Lows on the daily → Bearish bias; target = PDL
+//  2. During the New York session, watches for a sweep (fake-out) against bias:
+//       • Bullish day: wick breaks below the short-term swing low then closes above it.
+//       • Bearish day: wick breaks above the short-term swing high then closes below it.
+//  3. Immediately after the sweep, looks for an aligned Fair Value Gap (FVG).
+//  4. Marks the FVG as the entry zone, places a stop at the sweep extreme, and
+//     plots the previous-day High/Low as the target.
+//  5. Fires alerts at each key moment: sweep, FVG confirmation, pullback entry.
+// ══════════════════════════════════════════════════════════════════════════════
 
-// Input Groups (using constants, not var)
-G_BIAS = "🔷 Daily Bias"
-G_NY = "📍 New York Session"
-G_FVG = "📦 Fair Value Gap"
-G_FILTER = "🔧 Filters & Quality"
-G_RRR = "📈 Risk-Reward"
-G_DASH = "📊 Dashboard"
-G_ALERTS = "🔔 Alerts"
-G_VIS = "🎨 Visual"
+// ─────────────────────────────────────────────────────────────────────────────
+//  INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+var string G_BIAS  = "📅  Daily Bias"
+var string G_NY    = "🗽  New York Session"
+var string G_FVG   = "⬜  Fair Value Gap"
+var string G_FILTER = "🎯  Filters & Quality"
+var string G_RRR   = "📊  Risk-Reward"
+var string G_DASH  = "📈  Dashboard"
+var string G_ALERTS = "🔔  Alerts"
+var string G_VIS   = "🎨  Visual"
 
-// Daily Bias Settings
-lookback = input.int(10, "Sweep Lookback (bars)", minval=3, maxval=50, group=G_BIAS,
-                     tooltip="Number of 1H bars used to define the short-term swing high/low that price must sweep through.")
-show_bias = input.bool(true, "Show Daily Bias Label", group=G_BIAS)
-show_pdl = input.bool(true, "Show PDH / PDL Target Lines", group=G_BIAS)
+lookback   = input.int(10, "Sweep Lookback (bars)", minval=3, maxval=50, group=G_BIAS,
+                       tooltip="Number of 1H bars used to define the short-term swing high/low that price must sweep through.")
+show_bias  = input.bool(true, "Show Daily Bias Label",        group=G_BIAS)
+show_pdhl  = input.bool(true, "Show PDH / PDL Target Lines",  group=G_BIAS)
 show_pdhl_white = input.bool(true, "Show PDH / PDL in White (Cross-Reference Filter)", group=G_BIAS,
-                             tooltip="Display Previous Day High/Low as white price points for easy cross-reference. Toggle on/off to filter.")
+                            tooltip="Display Previous Day High/Low as white price points for easy cross-reference. Toggle on/off to filter.")
 
-// New York Session Settings
 ny_session = input.session("0930-1200", "NY Sweep Window", group=G_NY,
-                          tooltip="Time window in New York time during which sweeps are monitored. Default covers the key NY open hours.")
-show_sweep = input.bool(true, "Mark Sweeps on Chart", group=G_NY)
+                           tooltip="Time window in New York time during which sweeps are monitored. Default covers the key NY open hours.")
+show_sweep = input.bool(true, "Mark Sweeps on Chart",         group=G_NY)
 
-// Fair Value Gap Settings
-show_fvg = input.bool(true, "Draw FVG Entry Boxes", group=G_FVG)
-fvg_extend = input.int(50, "FVG Box Width (bars)", minval=5, maxval=500, group=G_FVG,
+show_fvg   = input.bool(true, "Draw FVG Entry Boxes",         group=G_FVG)
+fvg_extend = input.int(50,    "FVG Box Width (bars)", minval=5, maxval=500, group=G_FVG,
                        tooltip="How many bars to the right the FVG box extends while the setup is active.")
-fvg_window = input.int(5, "FVG Lookback After Sweep", minval=1, maxval=20, group=G_FVG,
+fvg_window = input.int(5,     "FVG Lookback After Sweep", minval=1, maxval=20, group=G_FVG,
                        tooltip="Maximum number of bars after a sweep in which an aligned FVG must appear to be considered valid.")
 
-// Filters & Quality Settings
 use_atr_filter = input.bool(true, "Enable ATR Volatility Filter", group=G_FILTER,
                            tooltip="Only allow sweeps when volatility (ATR) is adequate. Filters noise in quiet conditions.")
 min_atr_pct = input.float(0.3, "Min ATR % of Price", minval=0.0, maxval=2.0, step=0.1, group=G_FILTER,
                          tooltip="Minimum ATR as % of current price. Set 0 to disable. Higher = more selective.")
 
-// Risk-Reward Settings
 use_rr_filter = input.bool(true, "Enable RR Filter", group=G_RRR,
                           tooltip="Only show setups with risk-reward ratio above minimum threshold.")
 min_rr_ratio = input.float(2.0, "Minimum RR Ratio", minval=1.0, maxval=5.0, step=0.5, group=G_RRR,
-                          tooltip="Only show setups where reward/risk ≥ this ratio. 2.0 = 2:1 payoff.")
-show_rr_label = input.bool(true, "Show RR on Chart", group=G_RRR)
+                          tooltip="Only show setups where reward/risk >= this ratio. 2.0 = 2:1 payoff.")
+show_rr_label = input.bool(true, "Show RR on Chart", group=G_RRR,
+                          tooltip="Display risk-reward ratio for active setups.")
 
-// Dashboard Settings
 show_dashboard = input.bool(true, "Enable Dashboard", group=G_DASH,
                            tooltip="Show real-time setup status and key metrics.")
 dash_pos = input.string("top-left", "Dashboard Position", options=["top-left", "top-right", "bottom-left", "bottom-right"], group=G_DASH)
 
-// Alerts Settings
 use_json_alerts = input.bool(false, "Use JSON-style Alert Messages", group=G_ALERTS,
                             tooltip="Format alerts with JSON-like structure for journaling/automation.")
 
-// Visual Settings
-bull_col = input.color(color.new(#26A69A, 0), "Bullish Color", group=G_VIS)
-bear_col = input.color(color.new(#EF5350, 0), "Bearish Color", group=G_VIS)
+bull_col   = input.color(#00897B, "Bullish Color", group=G_VIS)
+bear_col   = input.color(#D32F2F, "Bearish Color", group=G_VIS)
 
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
+//  DAILY DATA  (confirmed previous-day values)
+//  Using lookahead_on so intraday bars always see the latest confirmed daily bar.
+// ─────────────────────────────────────────────────────────────────────────────
+[d_h1, d_l1] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead=barmerge.lookahead_on)
+[d_h2, d_l2] = request.security(syminfo.tickerid, "D", [high[2], low[2]], lookahead=barmerge.lookahead_on)
+[d_h3, d_l3] = request.security(syminfo.tickerid, "D", [high[3], low[3]], lookahead=barmerge.lookahead_on)
 
-f_get_daily_bias() =>
-    d_h1 = request.security(syminfo.tickerid, "D", high[1])
-    d_h2 = request.security(syminfo.tickerid, "D", high[2])
-    d_h3 = request.security(syminfo.tickerid, "D", high[3])
-    d_l1 = request.security(syminfo.tickerid, "D", low[1])
-    d_l2 = request.security(syminfo.tickerid, "D", low[2])
-    d_l3 = request.security(syminfo.tickerid, "D", low[3])
+// Previous-Day High/Low — these are the trade targets
+pd_high = d_h1
+pd_low  = d_l1
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  DAILY BIAS
+//  Three consecutive daily candles provide the swing structure:
+//    Higher Highs AND Higher Lows across the last three days → Bullish (+1)
+//    Lower  Highs AND Lower  Lows across the last three days → Bearish (−1)
+//    Anything else                                           → Neutral  (0)
+// ─────────────────────────────────────────────────────────────────────────────
+hh = d_h1 > d_h2 and d_h2 > d_h3
+hl = d_l1 > d_l2 and d_l2 > d_l3
+lh = d_h1 < d_h2 and d_h2 < d_h3
+ll = d_l1 < d_l2 and d_l2 < d_l3
+
+bias = hh and hl ? 1 : lh and ll ? -1 : 0
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  NEW YORK SESSION FILTER
+// ─────────────────────────────────────────────────────────────────────────────
+in_ny = not na(time(timeframe.period, ny_session, "America/New_York"))
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SHORT-TERM SWING LEVELS  (the levels that can be swept)
+//  Computed over the previous `lookback` bars so the current bar is excluded.
+// ─────────────────────────────────────────────────────────────────────────────
+st_high = ta.highest(high, lookback)[1]
+st_low  = ta.lowest(low,  lookback)[1]
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ATR & VOLATILITY FILTER
+//  Avoid sweeps in very quiet conditions by checking if current volatility
+//  is sufficient. ATR(14) must be > min_atr_pct% of close price.
+// ─────────────────────────────────────────────────────────────────────────────
+atr_14 = ta.atr(14)
+atr_pct = (atr_14 / close) * 100.0
+atr_threshold = min_atr_pct > 0 ? (close * min_atr_pct / 100.0) : 0
+volatility_ok = min_atr_pct <= 0 or atr_14 >= atr_threshold
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SWEEP DETECTION
+//  A sweep (fake-out / liquidity grab) is identified when:
+//    Bullish sweep: candle wicks BELOW the short-term swing low but CLOSES above it
+//    Bearish sweep: candle wicks ABOVE the short-term swing high but CLOSES below it
+//  Both conditions are only valid during the NY session and when the daily bias agrees.
+//  Optionally, ATR filter can exclude sweeps when volatility is insufficient.
+// ─────────────────────────────────────────────────────────────────────────────
+bull_sweep_raw = in_ny and bias == 1  and low  < st_low  and close > st_low
+bear_sweep_raw = in_ny and bias == -1 and high > st_high and close < st_high
+
+bull_sweep = use_atr_filter ? (bull_sweep_raw and volatility_ok) : bull_sweep_raw
+bear_sweep = use_atr_filter ? (bear_sweep_raw and volatility_ok) : bear_sweep_raw
+
+// Record the extreme of the sweep candle — used as the stop-loss invalidation point
+var float sweep_low_val  = na
+var float sweep_high_val = na
+
+if bull_sweep
+    sweep_low_val  := low
+if bear_sweep
+    sweep_high_val := high
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  FAIR VALUE GAP  (three-candle price imbalance)
+//  Bullish FVG: high of candle[2] < low of candle[0]  → gap above candle n-2
+//  Bearish FVG: low  of candle[2] > high of candle[0] → gap below candle n-2
+// ─────────────────────────────────────────────────────────────────────────────
+bull_fvg_cond = high[2] < low[0]
+bear_fvg_cond = low[2]  > high[0]
+
+bull_fvg_top = low[0]
+bull_fvg_bot = high[2]
+bear_fvg_top = low[2]
+bear_fvg_bot = high[0]
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SWEEP + FVG ALIGNMENT
+//  An FVG is only considered valid ("aligned") when it forms within `fvg_window`
+//  bars of a sweep in the same bias direction.
+// ─────────────────────────────────────────────────────────────────────────────
+var int last_bull_sweep_bar = na
+var int last_bear_sweep_bar = na
+
+if bull_sweep
+    last_bull_sweep_bar := bar_index
+if bear_sweep
+    last_bear_sweep_bar := bar_index
+
+bars_since_bull_sweep = na(last_bull_sweep_bar) ? na : bar_index - last_bull_sweep_bar
+bars_since_bear_sweep = na(last_bear_sweep_bar) ? na : bar_index - last_bear_sweep_bar
+
+aligned_bull_fvg = bias == 1  and bull_fvg_cond and
+                   not na(bars_since_bull_sweep) and
+                   bars_since_bull_sweep >= 1 and
+                   bars_since_bull_sweep <= fvg_window
+
+aligned_bear_fvg = bias == -1 and bear_fvg_cond and
+                   not na(bars_since_bear_sweep) and
+                   bars_since_bear_sweep >= 1 and
+                   bars_since_bear_sweep <= fvg_window
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  TRADE SETUP MANAGEMENT
+//  Once an aligned FVG is detected:
+//    • The FVG zone becomes the pullback entry area (drawn as a coloured box).
+//    • A dashed stop-loss line is placed at the sweep extreme (± 1 tick).
+//    • The PDH / PDL line already on the chart serves as the target.
+//  The setup is deactivated when:
+//    • Price closes beyond the stop-loss (setup invalidated).
+//    • Price reaches the target level (setup complete).
+// ─────────────────────────────────────────────────────────────────────────────
+var float fvg_top_b = na
+var float fvg_bot_b = na
+var float stop_b    = na
+var float fvg_top_s = na
+var float fvg_bot_s = na
+var float stop_s    = na
+var bool  active_b  = false
+var bool  active_s  = false
+var box   box_b     = na
+var box   box_s     = na
+var bool  alerted_b = false   // has the pullback-entry alert fired for this bull setup?
+var bool  alerted_s = false   // has the pullback-entry alert fired for this bear setup?
+var float rr_ratio_b = na     // risk-reward ratio for bull setup
+var float rr_ratio_s = na     // risk-reward ratio for bear setup
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  RISK-REWARD CALCULATION HELPERS
+//  Calculate RR ratio and check if it meets minimum threshold.
+// ─────────────────────────────────────────────────────────────────────────────
+calcRRRatio(entry, stop_val, target) =>
+    risk = math.abs(entry - stop_val)
+    reward = math.abs(target - entry)
+    risk > 0 ? reward / risk : 0
+
+isSetupQualityOk(rr) =>
+    use_rr_filter ? rr >= min_rr_ratio : true
+
+// ── New bullish setup ─────────────────────────────────────────────────────────
+if aligned_bull_fvg and not active_b
+    entry_zone_b = (bull_fvg_top + bull_fvg_bot) / 2.0  // midpoint for RR calculation
+    stop_candidate_b = sweep_low_val - syminfo.mintick
+    rr_candidate_b = calcRRRatio(entry_zone_b, stop_candidate_b, pd_high)
     
-    hh = d_h1 > d_h2 and d_h2 > d_h3
-    ll = d_l1 < d_l2 and d_l2 < d_l3
+    if isSetupQualityOk(rr_candidate_b)
+        fvg_top_b := bull_fvg_top
+        fvg_bot_b := bull_fvg_bot
+        stop_b    := stop_candidate_b
+        rr_ratio_b := rr_candidate_b
+        active_b  := true
+        alerted_b := false
+        if show_fvg
+            box_b := box.new(bar_index - 2, fvg_top_b, bar_index + fvg_extend, fvg_bot_b,
+                              border_color=bull_col, bgcolor=color.new(bull_col, 85),
+                              border_width=1, border_style=line.style_dashed)
+
+// ── New bearish setup ─────────────────────────────────────────────────────────
+if aligned_bear_fvg and not active_s
+    entry_zone_s = (bear_fvg_top + bear_fvg_bot) / 2.0  // midpoint for RR calculation
+    stop_candidate_s = sweep_high_val + syminfo.mintick
+    rr_candidate_s = calcRRRatio(entry_zone_s, stop_candidate_s, pd_low)
     
-    if hh and ll
-        1
-    else if not hh and not ll
-        -1
+    if isSetupQualityOk(rr_candidate_s)
+        fvg_top_s := bear_fvg_top
+        fvg_bot_s := bear_fvg_bot
+        stop_s    := stop_candidate_s
+        rr_ratio_s := rr_candidate_s
+        active_s  := true
+        alerted_s := false
+        if show_fvg
+            box_s := box.new(bar_index - 2, fvg_top_s, bar_index + fvg_extend, fvg_bot_s,
+                              border_color=bear_col, bgcolor=color.new(bear_col, 85),
+                              border_width=1, border_style=line.style_dashed)
+
+// ── Pullback entry detection ───────────────────────────────────────────────────
+// Fire once when price first trades into the FVG zone from above (bull) / below (bear).
+pullback_entry_b = active_b and not alerted_b and low <= fvg_top_b and high >= fvg_bot_b
+pullback_entry_s = active_s and not alerted_s and high >= fvg_bot_s and low  <= fvg_top_s
+
+if pullback_entry_b
+    alerted_b := true
+if pullback_entry_s
+    alerted_s := true
+
+// ── Extend / invalidate boxes and manage setup lifecycle ──────────────────────
+if active_b
+    if not na(box_b)
+        box.set_right(box_b, bar_index + 1)
+    bool invalidated_b = close <= stop_b
+    bool target_hit_b  = high  >= pd_high
+    if invalidated_b or target_hit_b
+        active_b  := false
+        alerted_b := false
+        if not na(box_b)
+            box.delete(box_b)
+            box_b := na
+        fvg_top_b := na
+        fvg_bot_b := na
+        stop_b    := na
+
+if active_s
+    if not na(box_s)
+        box.set_right(box_s, bar_index + 1)
+    bool invalidated_s = close >= stop_s
+    bool target_hit_s  = low   <= pd_low
+    if invalidated_s or target_hit_s
+        active_s  := false
+        alerted_s := false
+        if not na(box_s)
+            box.delete(box_s)
+            box_s := na
+        fvg_top_s := na
+        fvg_bot_s := na
+        stop_s    := na
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  STOP-LOSS AND ENTRY LINES  (drawn while a setup is active)
+// ─────────────────────────────────────────────────────────────────────────────
+var line sline_b = na
+var line sline_s = na
+
+if active_b
+    if na(sline_b)
+        sline_b := line.new(bar_index, stop_b, bar_index + 1, stop_b,
+                             color=color.red, width=1, style=line.style_dashed, extend=extend.none)
     else
-        0
+        line.set_x2(sline_b, bar_index + 1)
+else
+    line.delete(sline_b)
+    sline_b := na
 
-f_get_daily_target(bias) =>
-    if bias == 1
-        request.security(syminfo.tickerid, "D", high[1])
-    else if bias == -1
-        request.security(syminfo.tickerid, "D", low[1])
+if active_s
+    if na(sline_s)
+        sline_s := line.new(bar_index, stop_s, bar_index + 1, stop_s,
+                             color=color.red, width=1, style=line.style_dashed, extend=extend.none)
     else
-        na
+        line.set_x2(sline_s, bar_index + 1)
+else
+    line.delete(sline_s)
+    sline_s := na
 
-f_in_ny_session() =>
-    time_in_range(time, ny_session, "America/New_York")
+// ─────────────────────────────────────────────────────────────────────────────
+//  PLOTS
+// ─────────────────────────────────────────────────────────────────────────────
 
-f_get_sw_high() =>
-    ta.highest(high, lookback)
+// Previous-Day High and Low — the trade targets
+plot(show_pdhl ? pd_high : na, "PDH – Bull Target",
+     color=color.new(bull_col, 20), linewidth=1, style=plot.style_stepline)
+plot(show_pdhl ? pd_low : na,  "PDL – Bear Target",
+     color=color.new(bear_col, 20), linewidth=1, style=plot.style_stepline)
 
-f_get_sw_low() =>
-    ta.lowest(low, lookback)
+// White PDH / PDL for cross-reference filtering
+plot(show_pdhl_white ? pd_high : na, "PDH – Cross-Reference (White)",
+     color=color.new(color.white, 10), linewidth=2, style=plot.style_stepline)
+plot(show_pdhl_white ? pd_low : na,  "PDL – Cross-Reference (White)",
+     color=color.new(color.white, 10), linewidth=2, style=plot.style_stepline)
 
-f_is_sweep(bias) =>
-    if bias == 1
-        low < f_get_sw_low() and close > f_get_sw_low()
-    else if bias == -1
-        high > f_get_sw_high() and close < f_get_sw_high()
-    else
-        false
+// Background shading during the NY session window
+bgcolor(in_ny ? color.new(color.yellow, 95) : na, title="NY Session Background")
 
-f_check_fvg(bias) =>
-    if bias == 1
-        high[2] < low[0]
-    else if bias == -1
-        low[2] > high[0]
-    else
-        false
+// ── Sweep labels ──────────────────────────────────────────────────────────────
+if show_sweep and bull_sweep
+    label.new(bar_index, low, "SWEEP ↑",
+              yloc=yloc.belowbar, style=label.style_label_up,
+              color=bull_col, textcolor=color.white, size=size.small)
 
-f_is_in_fvg_box(bias, fvg_high, fvg_low) =>
-    if bias == 1
-        low <= fvg_high and high >= fvg_low
-    else if bias == -1
-        low <= fvg_high and high >= fvg_low
-    else
-        false
+if show_sweep and bear_sweep
+    label.new(bar_index, high, "SWEEP ↓",
+              yloc=yloc.abovebar, style=label.style_label_down,
+              color=bear_col, textcolor=color.white, size=size.small)
 
-f_get_atr_filter() =>
-    atr = ta.atr(14)
-    atr_pct = (atr / close) * 100
-    use_atr_filter ? atr_pct >= min_atr_pct : true
+// ── FVG confirmation labels ───────────────────────────────────────────────────
+if aligned_bull_fvg
+    label.new(bar_index, low, "FVG ✓",
+              yloc=yloc.belowbar, style=label.style_label_up,
+              color=bull_col, textcolor=color.white, size=size.small)
 
-// ============================================================================
-// STATE VARIABLES
-// ============================================================================
+if aligned_bear_fvg
+    label.new(bar_index, high, "FVG ✓",
+              yloc=yloc.abovebar, style=label.style_label_down,
+              color=bear_col, textcolor=color.white, size=size.small)
 
-var int bias = 0
-var float target = na
-var bool sweep_confirmed = false
-var int sweep_bar = 0
-var float sweep_extreme = na
-var bool fvg_confirmed = false
-var float fvg_high = na
-var float fvg_low = na
-var int fvg_bar = 0
-var bool entry_fired = false
-var bool setup_active = false
+// ── Pullback entry labels ─────────────────────────────────────────────────────
+if pullback_entry_b
+    label.new(bar_index, low, "ENTRY →",
+              yloc=yloc.belowbar, style=label.style_label_up,
+              color=color.new(bull_col, 0), textcolor=color.white, size=size.normal)
 
-// ============================================================================
-// MAIN LOGIC
-// ============================================================================
+if pullback_entry_s
+    label.new(bar_index, high, "ENTRY →",
+              yloc=yloc.abovebar, style=label.style_label_down,
+              color=color.new(bear_col, 0), textcolor=color.white, size=size.normal)
 
-// Update daily bias
-bias := f_get_daily_bias()
-target := f_get_daily_target(bias)
+// ── Daily bias label (top-right of screen, last bar only) ────────────────────
+if show_bias and barstate.islast
+    string bias_txt = bias == 1  ? "▲ BULLISH BIAS\nTarget: PDH " + str.tostring(pd_high, format.mintick) :
+                      bias == -1 ? "▼ BEARISH BIAS\nTarget: PDL " + str.tostring(pd_low,  format.mintick) :
+                      "◆ NEUTRAL – No clear structure"
+    color  bias_clr = bias == 1 ? bull_col : bias == -1 ? bear_col : color.gray
+    label.new(bar_index + 2, close, bias_txt,
+              style=label.style_label_left, color=bias_clr,
+              textcolor=color.white, size=size.normal)
 
-// Reset on new day
-if ta.change(time("D")) != 0
-    sweep_confirmed := false
-    fvg_confirmed := false
-    entry_fired := false
-    setup_active := false
-    sweep_extreme := na
-    fvg_high := na
-    fvg_low := na
+// ── Risk-Reward display on active setups ───────────────────────────────────────
+if show_rr_label and active_b and not na(rr_ratio_b)
+    rr_txt = "RR: " + str.tostring(rr_ratio_b, format.mintick)
+    label.new(bar_index, (fvg_top_b + fvg_bot_b) / 2, rr_txt,
+              yloc=yloc.price, style=label.style_label_center,
+              color=bull_col, textcolor=color.white, size=size.small)
 
-// Check for sweep during NY session
-in_ny = f_in_ny_session()
-if in_ny and bias != 0 and not sweep_confirmed
-    if f_is_sweep(bias)
-        sweep_confirmed := true
-        sweep_bar := bar_index
-        sweep_extreme := bias == 1 ? f_get_sw_low() : f_get_sw_high()
+if show_rr_label and active_s and not na(rr_ratio_s)
+    rr_txt = "RR: " + str.tostring(rr_ratio_s, format.mintick)
+    label.new(bar_index, (fvg_top_s + fvg_bot_s) / 2, rr_txt,
+              yloc=yloc.price, style=label.style_label_center,
+              color=bear_col, textcolor=color.white, size=size.small)
 
-// Check for FVG after sweep
-if sweep_confirmed and not fvg_confirmed
-    bars_since_sweep = bar_index - sweep_bar
-    if bars_since_sweep <= fvg_window
-        if f_check_fvg(bias)
-            fvg_confirmed := true
-            fvg_bar := bar_index
-            fvg_high := bias == 1 ? high[2] : high[0]
-            fvg_low := bias == 1 ? low[0] : low[2]
-            setup_active := true
-
-// Check for pullback entry into FVG
-if setup_active and fvg_confirmed and not entry_fired
-    if f_is_in_fvg_box(bias, fvg_high, fvg_low)
-        entry_fired := true
-
-// Invalidate setup on stop or target
-if setup_active
-    if bias == 1 and (close < (sweep_extreme - syminfo.mintick))
-        setup_active := false
-    if bias == -1 and (close > (sweep_extreme + syminfo.mintick))
-        setup_active := false
-    if close == target
-        setup_active := false
-
-// ============================================================================
-// ALERTS
-// ============================================================================
-
-if sweep_confirmed and not entry_fired
-    msg = use_json_alerts ? 
-          '{"event":"SWEEP","bias":"' + (bias == 1 ? "BULL" : "BEAR") + '"}' :
-          "[Daily Sweep] " + (bias == 1 ? "Bullish" : "Bearish") + " sweep detected during NY session."
-    if sweep_confirmed[1] == false
-        alert(msg)
-
-if fvg_confirmed and not entry_fired
-    msg = use_json_alerts ?
-          '{"event":"FVG","bias":"' + (bias == 1 ? "BULL" : "BEAR") + '"}' :
-          "[Daily Sweep] " + (bias == 1 ? "Bullish" : "Bearish") + " FVG aligned."
-    if fvg_confirmed[1] == false
-        alert(msg)
-
-if entry_fired
-    msg = use_json_alerts ?
-          '{"event":"ENTRY","bias":"' + (bias == 1 ? "BULL" : "BEAR") + '","entry":' + str.tostring(close) + '}' :
-          "[Daily Sweep] " + (bias == 1 ? "Bullish" : "Bearish") + " pullback entry – price in FVG."
-    if entry_fired[1] == false
-        alert(msg)
-
-// ============================================================================
-// VISUALIZATION
-// ============================================================================
-
-// PDH / PDL lines
-if show_pdl and not na(target)
-    line.new(bar_index - lookback, target, bar_index, target,
-             color=bias == 1 ? color.new(bull_col, 30) : bias == -1 ? color.new(bear_col, 30) : na,
-             width=2, style=line.style_dashed, xloc=xloc.bar_index)
-
-// Sweep label
-if sweep_confirmed and show_sweep
-    label.new(bar_index - (bar_index - sweep_bar), 
-              bias == 1 ? high + (high * 0.005) : low - (low * 0.005),
-              "SWEEP " + (bias == 1 ? "↑" : "↓"),
-              color=bias == 1 ? bull_col : bear_col,
-              textcolor=color.white,
-              style=bias == 1 ? label.style_label_down : label.style_label_up,
-              size=size.small)
-
-// FVG box
-if setup_active and show_fvg
-    box.new(fvg_bar, fvg_high, bar_index + fvg_extend, fvg_low,
-            bgcolor=color.new(bias == 1 ? bull_col : bear_col, 85),
-            border_color=bias == 1 ? bull_col : bear_col,
-            xloc=xloc.bar_index)
-
-// Entry label
-if entry_fired
-    label.new(bar_index, 
-              bias == 1 ? high + (high * 0.005) : low - (low * 0.005),
-              "ENTRY →",
-              color=color.new(color.yellow, 0),
-              textcolor=color.black,
-              style=label.style_label_center,
-              size=size.small)
-
-// Bias label (top-right)
-if show_bias and bias != 0
-    label.new(bar_index, high,
-              (bias == 1 ? "🐂 BULLISH" : "🐻 BEARISH") + " | Target: " + str.tostring(target, "#.00"),
-              color=bias == 1 ? bull_col : bear_col,
-              textcolor=color.white,
-              yloc=yloc.abovebar,
-              xloc=xloc.bar_index,
-              style=label.style_label_left,
-              size=size.small)
-
-// Risk-Reward on chart
-if show_rr_label and setup_active and entry_fired
-    entry_price = (fvg_high + fvg_low) / 2
-    stop_price = sweep_extreme
-    reward = math.abs(target - entry_price)
-    risk = math.abs(entry_price - stop_price)
-    rr = risk > 0 ? reward / risk : 0
-    label.new(bar_index, entry_price, "RR: " + str.tostring(rr, "#.0"),
-              color=color.new(color.gray, 50),
-              textcolor=color.white,
-              style=label.style_label_center,
-              size=size.tiny)
-
-// Dashboard
-if show_dashboard
-    pos = dash_pos == "top-left" ? position.top_left :
-          dash_pos == "top-right" ? position.top_right :
-          dash_pos == "bottom-left" ? position.bottom_left :
-          position.bottom_right
+// ─────────────────────────────────────────────────────────────────────────────
+//  INTERACTIVE DASHBOARD
+//  Displays real-time status of bias, session, active setup, and A+ checklist.
+// ─────────────────────────────────────────────────────────────────────────────
+if show_dashboard and barstate.islast
+    // Build dashboard text
+    string setup_status = active_b ? "🟦 Bull Active" : active_s ? "🟥 Bear Active" : "⚪ No Setup"
+    string ny_status = in_ny ? "🟢 NY OPEN" : "⚫ NY CLOSED"
+    string vol_status = volatility_ok ? "✓ Vol OK" : "✗ Vol Low"
     
-    var table tb = table.new(pos, 2, 8, bgcolor=color.new(color.black, 80), border_color=color.gray, border_width=1)
+    string entry_txt = active_b ? "Entry: " + str.tostring((fvg_top_b + fvg_bot_b) / 2, format.mintick) :
+                       active_s ? "Entry: " + str.tostring((fvg_top_s + fvg_bot_s) / 2, format.mintick) :
+                       "Entry: —"
+    string stop_txt = active_b ? "Stop: " + str.tostring(stop_b, format.mintick) :
+                      active_s ? "Stop: " + str.tostring(stop_s, format.mintick) :
+                      "Stop: —"
+    string target_txt = active_b ? "Target: " + str.tostring(pd_high, format.mintick) :
+                        active_s ? "Target: " + str.tostring(pd_low, format.mintick) :
+                        "Target: —"
+    string rr_txt = active_b ? "RR: " + str.tostring(rr_ratio_b, "0.0") + ":1" :
+                    active_s ? "RR: " + str.tostring(rr_ratio_s, "0.0") + ":1" :
+                    "RR: —"
     
-    if barstate.islast
-        table.cell(tb, 0, 0, "━━ DAILY SWEEP ━━", bgcolor=color.new(bias == 1 ? bull_col : bear_col, 0), text_color=color.white, text_size=size.small)
-        table.cell(tb, 0, 1, "Bias:", text_color=color.white, text_size=size.small)
-        table.cell(tb, 1, 1, bias == 1 ? "🐂 BULL" : bias == -1 ? "🐻 BEAR" : "◆ NEUTRAL", text_color=color.white, text_size=size.small)
-        table.cell(tb, 0, 2, "Session:", text_color=color.white, text_size=size.small)
-        table.cell(tb, 1, 2, in_ny ? "🟢 NY OPEN" : "◯ WAITING", text_color=color.white, text_size=size.small)
-        table.cell(tb, 0, 3, "Sweep:", text_color=color.white, text_size=size.small)
-        table.cell(tb, 1, 3, sweep_confirmed ? "✓" : "○", text_color=color.white, text_size=size.small)
-        table.cell(tb, 0, 4, "FVG:", text_color=color.white, text_size=size.small)
-        table.cell(tb, 1, 4, fvg_confirmed ? "✓" : "○", text_color=color.white, text_size=size.small)
-        table.cell(tb, 0, 5, "Entry:", text_color=color.white, text_size=size.small)
-        table.cell(tb, 1, 5, entry_fired ? "✓ LIVE" : "○ AWAIT", text_color=color.white, text_size=size.small)
-        table.cell(tb, 0, 6, "Stop:", text_color=color.white, text_size=size.small)
-        table.cell(tb, 1, 6, na(sweep_extreme) ? "—" : str.tostring(sweep_extreme, "#.00"), text_color=color.white, text_size=size.small)
-        table.cell(tb, 0, 7, "Target:", text_color=color.white, text_size=size.small)
-        table.cell(tb, 1, 7, na(target) ? "—" : str.tostring(target, "#.00"), text_color=color.white, text_size=size.small)
+    // A+ Checklist
+    string sweep_check = (bull_sweep_raw or bear_sweep_raw) ? "✓" : "○"
+    string fvg_check = (aligned_bull_fvg or aligned_bear_fvg) ? "✓" : "○"
+    string rr_check = (active_b or active_s) ? "✓" : "○"
+    
+    string dash_txt = 
+        "━━ DAILY SWEEP DASHBOARD ━━\n" +
+        setup_status + "  " + ny_status + "\n" +
+        "Bias: " + (bias == 1 ? "▲ BULL" : bias == -1 ? "▼ BEAR" : "◆ NEUTRAL") + "  " + vol_status + "\n" +
+        "────────────────────────\n" +
+        entry_txt + "\n" +
+        stop_txt + "\n" +
+        target_txt + "\n" +
+        rr_txt + "\n" +
+        "────────────────────────\n" +
+        "A+ CHECKLIST:\n" +
+        "Sweep: " + sweep_check + "  |  FVG: " + fvg_check + "  |  RR: " + rr_check + "  |  Vol: " + (volatility_ok ? "✓" : "✗")
+    
+    // Determine position
+    var_y = close
+    var_style = dash_pos == "top-left" ? label.style_label_left :
+                dash_pos == "top-right" ? label.style_label_right :
+                dash_pos == "bottom-left" ? label.style_label_left :
+                label.style_label_right
+    
+    label.new(bar_index + (dash_pos == "top-right" or dash_pos == "bottom-right" ? 1 : -1),
+              var_y, dash_txt,
+              style=var_style, color=color.new(#1a1a1a, 20), textcolor=color.white, size=size.small)
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ALERT CONDITIONS — with optional JSON-style enhanced messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Helper function to build JSON-style messages
+jsonSweepMessage(type) =>
+    json_msg = "{\"event\":\"" + type + "_sweep\",\"bias\":\"" + 
+               (bias == 1 ? "BULL" : "BEAR") + "\",\"atr%\":" + 
+               str.tostring(atr_pct, "0.00") + ",\"volatility\":\"" +
+               (volatility_ok ? "ADEQUATE" : "LOW") + "\"}"
+    use_json_alerts ? json_msg : "[Daily Sweep] " + type + " fake-out detected during NY session."
+
+jsonFVGMessage(type) =>
+    json_msg = "{\"event\":\"" + type + "_fvg\",\"entry_zone\":" + 
+               str.tostring(type == "BULL" ? (bull_fvg_top + bull_fvg_bot) / 2 : (bear_fvg_top + bear_fvg_bot) / 2, "0.00") +
+               ",\"target\":" + str.tostring(type == "BULL" ? pd_high : pd_low, "0.00") + ",\"rr\":" +
+               str.tostring(type == "BULL" ? rr_ratio_b : rr_ratio_s, "0.0") + "}"
+    use_json_alerts ? json_msg : "[Daily Sweep] " + type + " FVG confirmed. Await pullback entry."
+
+jsonEntryMessage(type) =>
+    json_msg = "{\"event\":\"" + type + "_entry\",\"entry_zone\":" + 
+               str.tostring(type == "BULL" ? (fvg_top_b + fvg_bot_b) / 2 : (fvg_top_s + fvg_bot_s) / 2, "0.00") +
+               ",\"stop\":" + str.tostring(type == "BULL" ? stop_b : stop_s, "0.00") +
+               ",\"target\":" + str.tostring(type == "BULL" ? pd_high : pd_low, "0.00") +
+               ",\"rr\":" + str.tostring(type == "BULL" ? rr_ratio_b : rr_ratio_s, "0.0") + "}"
+    use_json_alerts ? json_msg : "[Daily Sweep] Price in " + type + " FVG. Consider entry now."
+
+alertcondition(bull_sweep,
+               title="Bullish Sweep Detected",
+               message=jsonSweepMessage("BULL"))
+
+alertcondition(bear_sweep,
+               title="Bearish Sweep Detected",
+               message=jsonSweepMessage("BEAR"))
+
+alertcondition(aligned_bull_fvg,
+               title="Bullish FVG Aligned – Await Pullback",
+               message=jsonFVGMessage("BULL"))
+
+alertcondition(aligned_bear_fvg,
+               title="Bearish FVG Aligned – Await Pullback",
+               message=jsonFVGMessage("BEAR"))
+
+alertcondition(pullback_entry_b,
+               title="Bullish Pullback Entry – Price in FVG",
+               message=jsonEntryMessage("BULL"))
+
+alertcondition(pullback_entry_s,
+               title="Bearish Pullback Entry – Price in FVG",
+               message=jsonEntryMessage("BEAR"))
